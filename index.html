@@ -3,7 +3,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>VidyaSetu AI - Premium</title>
     <meta name="description" content="School Management System" />
     <!-- Dynamic Theme Color for Mobile Status Bar -->
@@ -13,11 +13,16 @@
     <script>
       // Blocking script to prevent theme blink
       (function() {
-        const savedTheme = localStorage.getItem('vidyasetu_theme');
-        const theme = savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-        if (theme === 'dark') {
-          document.documentElement.classList.add('dark');
-        } else {
+        try {
+          const savedTheme = localStorage.getItem('vidyasetu_theme');
+          const theme = savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {
+          // Fallback if localStorage fails
           document.documentElement.classList.remove('dark');
         }
       })();
@@ -71,19 +76,36 @@
             --safe-top: env(safe-area-inset-top, 0px);
             --safe-bottom: env(safe-area-inset-bottom, 0px);
         }
-        html, body {
+        
+        /* MANDATORY: Explicit backgrounds to prevent WebView transparency crashes */
+        html {
+            background-color: #F8FAFC;
+            -webkit-tap-highlight-color: transparent;
+        }
+        html.dark {
+            background-color: #020617;
+        }
+        
+        body {
             margin: 0;
             padding: 0;
             height: 100%;
             width: 100%;
-            overflow: hidden;
+            overflow: hidden; /* App handles scrolling */
             overscroll-behavior: none;
-            -webkit-tap-highlight-color: transparent;
-            /* Ensures background fills safe areas */
-            background-color: #F8FAFC;
+            background-color: #F8FAFC; /* Light mode backup */
+            color: #0f172a;
         }
         html.dark body {
-            background-color: #020617;
+            background-color: #020617; /* Dark mode backup */
+            color: #ffffff;
+        }
+
+        #root {
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
         }
 
         .glass-card {
@@ -96,21 +118,21 @@
         }
 
         .glass-header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
+            background: rgba(255, 255, 255, 0.98); /* Less transparent for performance */
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
         }
         html.dark .glass-header {
-            background: rgba(2, 6, 23, 0.95);
+            background: rgba(2, 6, 23, 0.98);
         }
 
         .glass-nav {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
         }
         html.dark .glass-nav {
-            background: rgba(2, 6, 23, 0.95);
+            background: rgba(2, 6, 23, 0.98);
         }
 
         .bg-blob {
@@ -118,10 +140,12 @@
             width: 450px;
             height: 450px;
             border-radius: 50%;
-            filter: blur(120px);
+            /* Reduced blur for low-RAM devices (2GB) to prevent rendering crash */
+            filter: blur(80px); 
             z-index: -1;
-            opacity: 0.2;
+            opacity: 0.15;
             pointer-events: none;
+            will-change: transform; /* Hardware acceleration hint */
         }
         html.dark .bg-blob {
             opacity: 0.08;
@@ -132,31 +156,31 @@
         }
 
         .premium-modal-backdrop {
-          animation: backdrop-fade 0.45s cubic-bezier(0.32, 0.72, 0, 1) both;
+          animation: backdrop-fade 0.3s cubic-bezier(0.32, 0.72, 0, 1) both;
         }
         @keyframes backdrop-fade {
           from { opacity: 0; backdrop-filter: blur(0px); }
-          to { opacity: 1; backdrop-filter: blur(12px); }
+          to { opacity: 1; backdrop-filter: blur(8px); } /* Reduced blur for perfs */
         }
 
         .premium-modal-content {
-          animation: premium-pop 0.55s cubic-bezier(0.32, 0.72, 0, 1) both;
+          animation: premium-pop 0.4s cubic-bezier(0.32, 0.72, 0, 1) both;
           will-change: transform, opacity;
           transform-origin: center center;
           -webkit-backface-visibility: hidden;
           backface-visibility: hidden;
         }
         @keyframes premium-pop {
-          0% { opacity: 0; transform: scale(0.85) translateY(60px); }
+          0% { opacity: 0; transform: scale(0.9) translateY(40px); }
           100% { opacity: 1; transform: scale(1) translateY(0); }
         }
 
         .premium-subview-enter {
-          animation: premium-slide-in 0.45s cubic-bezier(0.32, 0.72, 0, 1) both;
+          animation: premium-slide-in 0.35s cubic-bezier(0.32, 0.72, 0, 1) both;
           will-change: transform, opacity;
         }
         @keyframes premium-slide-in {
-          0% { opacity: 0; transform: scale(0.96) translateX(30px); }
+          0% { opacity: 0; transform: scale(0.98) translateX(20px); }
           100% { opacity: 1; transform: scale(1) translateX(0); }
         }
 

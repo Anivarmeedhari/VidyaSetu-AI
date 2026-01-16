@@ -10,10 +10,14 @@ interface BottomNavProps {
 
 export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onChangeView, onOpenAIChat }) => {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 glass-nav border-t border-slate-200/60 dark:border-white/5 flex flex-col items-center justify-center z-50 safe-padding-bottom h-[calc(4.5rem+env(safe-area-inset-bottom,0px))] transition-all duration-300 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.02)]">
+    // Fixed layout logic:
+    // 1. pb-[env(safe-area-inset-bottom)] adds padding equivalent to the system nav bar height at the bottom.
+    // 2. The glass background covers this padding.
+    // 3. The inner div holds the buttons at the top of the container, strictly above the safe area.
+    <nav className="fixed bottom-0 left-0 right-0 glass-nav border-t border-slate-200/60 dark:border-white/5 flex flex-col justify-end z-50 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.02)] transition-all duration-300">
       
-      {/* Wrapper to keep content at exactly 4.5rem height, pushed UP by the safe area padding */}
-      <div className="w-full max-w-[320px] flex justify-between items-center h-[4.5rem] px-8 relative">
+      {/* Wrapper to keep content at exactly 4.5rem height */}
+      <div className="w-full max-w-[320px] mx-auto flex justify-between items-center h-[4.5rem] px-8 relative">
         
         {/* Home Button */}
         <button
@@ -30,7 +34,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onChangeView,
           </div>
         </button>
 
-        {/* Center Floating AI Button - Positioned exactly relative to the 4.5rem bar */}
+        {/* Center Floating AI Button */}
         <div className="absolute left-1/2 -top-8 -translate-x-1/2 flex flex-col items-center z-50">
             <button
               onClick={onOpenAIChat}

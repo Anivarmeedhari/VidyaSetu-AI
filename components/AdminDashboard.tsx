@@ -542,7 +542,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userNa
         </>
       )}
 
-      <main className="flex-1 overflow-y-auto no-scrollbar pb-24">
+      {/* Adjusted margin bottom to include safe-area-inset-bottom, ensuring content is not hidden by the bottom nav */}
+      <main className="flex-1 overflow-y-auto no-scrollbar pb-24" style={{ marginBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="max-w-4xl mx-auto px-4 pt-4">
           
           {/* HOME VIEW */}
@@ -654,8 +655,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userNa
         </div>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 glass-nav border-t border-slate-100 dark:border-white/5 flex flex-col items-center justify-center z-[60] safe-padding-bottom h-[calc(4.5rem+env(safe-area-inset-bottom,0px))] transition-all duration-300 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.02)]">
-        <div className="w-full max-w-[320px] flex justify-around items-center h-[4.5rem] px-8 relative">
+      <nav className="fixed bottom-0 left-0 right-0 glass-nav border-t border-slate-100 dark:border-white/5 flex flex-col justify-end z-[60] pb-[env(safe-area-inset-bottom)] transition-all duration-300 shadow-[0_-10px_30px_-10px_rgba(0,0,0,0.02)]">
+        <div className="w-full max-w-[320px] mx-auto flex justify-around items-center h-[4.5rem] px-8 relative">
             <button onClick={() => handleAdminViewChange('home')} className={`flex flex-col items-center justify-center transition-all duration-300 active:scale-90 w-16 group ${adminView === 'home' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400'}`}><div className="relative"><Home size={28} strokeWidth={adminView === 'home' ? 2.5 : 2} className="transition-all duration-300 drop-shadow-sm" />{adminView === 'home' && <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-emerald-500 rounded-full animate-in fade-in zoom-in"></span>}</div><span className="text-[9px] font-black uppercase mt-1">Home</span></button>
             <button onClick={() => handleAdminViewChange('action')} className={`flex flex-col items-center justify-center transition-all duration-300 active:scale-90 w-16 group ${adminView === 'action' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400'}`}><div className="relative"><Zap size={28} strokeWidth={adminView === 'action' ? 2.5 : 2} className="transition-all duration-300 drop-shadow-sm" />{adminView === 'action' && <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-emerald-500 rounded-full animate-in fade-in zoom-in"></span>}</div><span className="text-[9px] font-black uppercase mt-1">Action</span></button>
         </div>

@@ -76,6 +76,9 @@ const AppContent: React.FC = () => {
     } catch (e) {}
   };
 
+  // Critical Safety: Ensure render never returns null to prevent white screen
+  if (!authData) return <div className="fixed inset-0 bg-white dark:bg-dark-950" />;
+
   // Switch Case for immediate rendering based on initial synchronous state
   switch(authData.view) {
     case 'admin':
@@ -92,7 +95,8 @@ const AppContent: React.FC = () => {
 
 const App: React.FC = () => (
   <ThemeLanguageProvider>
-    <div className="fixed inset-0 bg-white dark:bg-dark-950">
+    {/* Hardcoded background wrapper for APK stability */}
+    <div className="fixed inset-0 bg-white dark:bg-dark-950 flex flex-col">
       <AppContent />
     </div>
   </ThemeLanguageProvider>

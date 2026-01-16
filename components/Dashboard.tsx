@@ -259,7 +259,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
     <div className="fixed inset-0 h-screen w-screen bg-[#F8FAFC] dark:bg-dark-950 flex flex-col overflow-hidden transition-colors">
       <Header onRefresh={handleManualRefresh} onOpenSettings={() => setActiveMenuModal('settings')} onOpenAbout={() => setActiveMenuModal('about')} onOpenHelp={() => setActiveMenuModal('help')} onOpenNotices={() => setIsNoticeListOpen(true)} onLogout={onLogout} />
 
-      {/* Main Container - Pushed down by Header height and up by BottomNav height including safe areas */}
+      {/* Main Container - Adjusted margin bottom to include safe-area-inset-bottom so content is not hidden behind the nav */}
       <main className="flex-1 w-full flex flex-col overflow-hidden relative" style={{ marginTop: 'calc(5.5rem + env(safe-area-inset-top, 0px))', marginBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }}>
         {currentView === 'home' ? (
             <>
