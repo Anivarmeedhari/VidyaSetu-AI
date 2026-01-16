@@ -12,7 +12,6 @@ import {
 import { Modal } from './Modal';
 import { SettingsModal, AboutModal, HelpModal } from './MenuModals';
 import { useThemeLanguage } from '../contexts/ThemeLanguageContext';
-import { useModalBackHandler } from '../hooks/useModalBackHandler';
 import { upsertVehicle, fetchSchoolClasses, addSchoolClass, fetchClassSubjects, addClassSubject, fetchSubjectLessons, addSubjectLesson, fetchLessonHomework, addLessonHomework, updateSchoolPeriods } from '../services/dashboardService';
 
 interface AdminDashboardProps {
@@ -34,12 +33,51 @@ const setCache = (key: string, data: any) => {
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userName }) => {
   const { t } = useThemeLanguage();
   
-  const [adminView, setAdminView] = useState<'home' | 'action'>(() => {
-    return (window.history.state?.adminView === 'action') ? 'action' : 'home';
-  });
-  const [activeTab, setActiveTab] = useState<'schools' | 'users' | 'transport'>(() => {
-    return window.history.state?.activeTab || 'schools';
-  });
+  // --- NAVIGATION STATE ---
+  const [adminView, setAdminView] = useState<'home' | 'action'>('home');
+  const [activeTab, setActiveTab] = useState<'schools' | 'users' | 'transport'>('schools');
+  const [navStack, setNavStack] = useState<any[]>([]); // For home drill downs
+
+  // --- HISTORY LOGIC ---
+  
+  // Push view to stack
+  const pushNav = (item: any) => {
+      window.history.pushState({ stackIdx: navStack.length + 1 }, '');
+      setNavStack(prev => [...prev, item]);
+  };
+
+  // Switch Main View (Home/Action)
+  const handleAdminViewChange = (view: 'home' | 'action') => {
+    if (view === adminView && navStack.length === 0) return;
+    
+    if (view === 'home') {
+        // Reset Logic for Home Button
+        setNavStack([]);
+        setAdminView('home');
+        // Clear browser forward history by replacing state
+        window.history.replaceState(null, '', window.location.href);
+    } else {
+        // Switching to Action view
+        if(adminView !== 'action') {
+            window.history.pushState({ view: 'action' }, '');
+            setAdminView('action');
+        }
+    }
+  };
+
+  // Back Button Listener
+  useEffect(() => {
+      const handlePop = (e: PopStateEvent) => {
+          if (navStack.length > 0) {
+              setNavStack(prev => prev.slice(0, -1));
+          } else if (adminView === 'action') {
+              setAdminView('home');
+          }
+      };
+      window.addEventListener('popstate', handlePop);
+      return () => window.removeEventListener('popstate', handlePop);
+  }, [navStack, adminView]);
+
 
   // --- DATA STATE ---
   const [schools, setSchools] = useState<any[]>(getCache('admin_schools') || []);
@@ -54,10 +92,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userNa
   const [searchTerm, setSearchTerm] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // --- NAVIGATION STACK (Home Tab Drill Down) ---
-  const [navStack, setNavStack] = useState<any[]>([]);
-
-  // --- MODAL STATES ---
+  // --- MODAL STATES (Independent of stack, handled via their own history push in effect below) ---
   const [isSchoolModalOpen, setIsSchoolModalOpen] = useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [isVehicleModalOpen, setIsVehicleModalOpen] = useState(false);
@@ -107,15 +142,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userNa
   const [itemToDelete, setItemToDelete] = useState<{id: string, name: string, type: 'school' | 'user' | 'vehicle'} | null>(null);
   const [expiryDate, setExpiryDate] = useState(''); 
 
-  // --- BACK HANDLER ---
-  useModalBackHandler(
-    isMenuOpen || !!activeMenuModal || navStack.length > 0 || !!selectedSchoolDetails || !!selectedUserDetails || !!selectedVehicleDetails || isSchoolModalOpen || isUserModalOpen || isVehicleModalOpen || deleteModalStep !== 'none' || isCurriculumModalOpen || isPeriodsModalOpen,
-    () => {
+  // --- MODAL BACK HANDLER ---
+  // Handle modals closing via back button (overlays)
+  useEffect(() => {
+      const handleModalBack = () => {
         if (activeMenuModal) setActiveMenuModal(null);
         else if (isMenuOpen) setIsMenuOpen(false);
-        else if (navStack.length > 0) {
-            setNavStack(prev => prev.slice(0, -1)); 
-        }
         else if (isPeriodsModalOpen) {
             if (selectedSchoolForPeriods) setSelectedSchoolForPeriods(null);
             else setIsPeriodsModalOpen(false);
@@ -134,20 +166,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userNa
             else if (currStep === 'manage_lessons') setCurrStep('manage_subjects');
             else if (currStep === 'manage_homework') setCurrStep('manage_lessons');
         }
-    }
-  );
+      };
 
-  // --- NAVIGATION HELPERS ---
-  useEffect(() => {
-    const handlePop = (e: PopStateEvent) => {
-      if (e.state) {
-        if (e.state.adminView) setAdminView(e.state.adminView);
-        if (e.state.activeTab) setActiveTab(e.state.activeTab);
+      if (isMenuOpen || activeMenuModal || selectedSchoolDetails || selectedUserDetails || selectedVehicleDetails || isSchoolModalOpen || isUserModalOpen || isVehicleModalOpen || deleteModalStep !== 'none' || isCurriculumModalOpen || isPeriodsModalOpen) {
+          const stateId = Date.now();
+          window.history.pushState({ modalId: stateId }, '');
+          const onPop = () => handleModalBack();
+          window.addEventListener('popstate', onPop);
+          return () => window.removeEventListener('popstate', onPop);
       }
-    };
-    window.addEventListener('popstate', handlePop);
-    return () => window.removeEventListener('popstate', handlePop);
-  }, []);
+  }, [isMenuOpen, activeMenuModal, selectedSchoolDetails, selectedUserDetails, selectedVehicleDetails, isSchoolModalOpen, isUserModalOpen, isVehicleModalOpen, deleteModalStep, isCurriculumModalOpen, currStep, isPeriodsModalOpen, selectedSchoolForPeriods]);
+
 
   // --- PARENT & STUDENT FETCHING FOR DROPDOWNS ---
   useEffect(() => {
@@ -180,19 +209,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userNa
       fetchParentChildren();
   }, [newUser.parent_id]);
 
-  const handleAdminViewChange = (view: 'home' | 'action') => {
-    if (view !== adminView) {
-      window.history.pushState({ adminView: view, activeTab }, '', window.location.href);
-      setAdminView(view);
-      setNavStack([]);
-    }
-  };
-
   const handleTabChange = (tab: 'schools' | 'users' | 'transport') => {
-    if (tab !== activeTab) {
-      window.history.pushState({ adminView, activeTab: tab }, '', window.location.href);
-      setActiveTab(tab);
-    }
+    setActiveTab(tab);
   };
 
   // --- DATA FETCHING ---
@@ -515,14 +533,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userNa
       else if (type === 'active_schools') data = schools.filter(s => s.is_active);
       else if (type === 'total_users') data = users;
       else if (type === 'active_users') data = users.filter(u => isUserActive(u.subscription_end_date));
-      pushToStack({ type: 'summary', data: data, title: t(type), readonly: true });
+      pushNav({ type: 'summary', data: data, title: t(type), readonly: true });
   };
-  const pushToStack = (view: any) => { setNavStack([...navStack, view]); };
 
   return (
     <div className="fixed inset-0 h-screen w-screen bg-white dark:bg-dark-950 flex flex-col overflow-hidden transition-colors">
       
-      {/* Header */}
+      {/* Header - Increased height and added safe-area padding */}
       <header className="h-[calc(5.5rem+env(safe-area-inset-top,0px))] bg-white/80 dark:bg-dark-900/60 backdrop-blur-3xl shadow-sm z-[100] px-6 flex items-end justify-between border-b border-slate-100 dark:border-white/5 flex-shrink-0 relative pb-4 safe-padding-top">
         <div className="flex items-center gap-3"><div className="w-11 h-11 bg-emerald-500/10 text-emerald-500 rounded-2xl flex items-center justify-center shadow-inner border border-emerald-500/10"><ShieldAlert size={26} /></div><div><h1 className="text-xl font-black text-slate-800 dark:text-white tracking-tight uppercase leading-none">VidyaSetu</h1><p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-500 uppercase tracking-widest mt-1">System Admin</p></div></div>
         <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2.5 transition-all rounded-full active:scale-90 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 z-[110] relative"><MoreVertical size={24} /></button>
@@ -586,7 +603,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, userNa
               ) : (
                   <div className="space-y-4 premium-subview-enter">
                       <div className="flex items-center gap-2">
-                          <button onClick={() => setNavStack(prev => prev.slice(0, -1))} className="p-2 bg-slate-100 dark:bg-white/5 rounded-xl active:scale-90 transition-all"><ArrowLeft size={20} /></button>
+                          <button onClick={() => { window.history.back(); /* Triggers popstate listener */ }} className="p-2 bg-slate-100 dark:bg-white/5 rounded-xl active:scale-90 transition-all"><ArrowLeft size={20} /></button>
                           <h3 className="font-black text-lg uppercase dark:text-white">{navStack[navStack.length-1].title}</h3>
                       </div>
                       <div className="space-y-3">

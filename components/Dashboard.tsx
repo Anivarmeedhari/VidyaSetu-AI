@@ -25,7 +25,6 @@ import { ChevronRight, CheckCircle2, RefreshCw, UserCheck, Bell, BarChart2, Book
 import { SubscriptionModal } from './SubscriptionModal';
 import { Modal } from './Modal';
 import { AIChatModal } from './AIChatModal';
-import { useModalBackHandler } from '../hooks/useModalBackHandler';
 
 interface DashboardProps {
   credentials: LoginRequest;
@@ -37,27 +36,70 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userName, onLogout }) => {
   const { t } = useThemeLanguage();
   
-  const [currentView, setCurrentView] = useState<'home' | 'profile'>(() => {
-    return (window.history.state?.view === 'profile') ? 'profile' : 'home';
-  });
+  // --- CORE VIEW STATE ---
+  const [currentView, setCurrentView] = useState<'home' | 'profile'>('home');
 
   // --- NAVIGATION STACKS ---
-  const [principalStack, setPrincipalStack] = useState<string[]>([]);
-  const [teacherStack, setTeacherStack] = useState<string[]>([]);
-  const [parentStack, setParentStack] = useState<string[]>([]); 
+  // Using a single stack for simplicity, depending on role
+  const [navStack, setNavStack] = useState<string[]>([]);
 
-  // Back Handler for All Navigation Stacks
-  useModalBackHandler(
-      (role === 'principal' && principalStack.length > 0) || 
-      (role === 'teacher' && teacherStack.length > 0) ||
-      ((role === 'parent' || role === 'student') && parentStack.length > 0), 
-      () => {
-          if (role === 'principal') setPrincipalStack(prev => prev.slice(0, -1));
-          if (role === 'teacher') setTeacherStack(prev => prev.slice(0, -1));
-          if (role === 'parent' || role === 'student') setParentStack(prev => prev.slice(0, -1));
-      }
-  );
+  // --- NAVIGATION HANDLERS ---
+  
+  // 1. Push a new step (Forward)
+  const pushToStack = (key: string) => {
+    // Add to browser history so Back button works
+    window.history.pushState({ stackIdx: navStack.length + 1 }, '');
+    setNavStack(prev => [...prev, key]);
+  };
 
+  // 2. Handle Hardware Back Button
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      // If we have items in the stack, pop one
+      setNavStack(prev => {
+        if (prev.length > 0) {
+          return prev.slice(0, -1);
+        } else if (currentView === 'profile') {
+          setCurrentView('home'); // Go back to home from profile
+          return [];
+        }
+        return [];
+      });
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [currentView]);
+
+  // 3. Close specific modal (Manual Close X)
+  const closeTopModal = () => {
+    window.history.back(); // Trigger popstate to handle state update
+  };
+
+  // 4. Handle Bottom Nav "Home" Click (RESET HISTORY)
+  const handleHomeClick = () => {
+    if (currentView === 'home' && navStack.length === 0) return;
+    
+    // Clear the stack visually
+    setNavStack([]);
+    setCurrentView('home');
+    
+    // Reset browser history cleanly to avoid loop
+    // We replace the current state to be the "root"
+    window.history.replaceState(null, '', window.location.href);
+  };
+
+  // 5. Handle Bottom Nav "Profile" Click
+  const handleProfileClick = () => {
+    if (currentView === 'profile') return;
+    // Push history for profile so back works
+    window.history.pushState({ view: 'profile' }, '');
+    setCurrentView('profile');
+    setNavStack([]); // Profile has its own context, clear dashboard stack
+  };
+
+
+  // --- DATA STATES ---
   const [data, setData] = useState<DashboardData | null>(null);
   const [isSchoolActive, setIsSchoolActive] = useState(true);
   const [isUserActive, setIsUserActive] = useState(true);
@@ -67,25 +109,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
   const [initialLoading, setInitialLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [fetchError, setFetchError] = useState(false);
 
-  // States managed by stack keys
+  // Selection States
   const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null);
   const [selectedHomework, setSelectedHomework] = useState<ParentHomework | null>(null);
-  
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  
+  // Independent Modals (Not in main stack usually, or can be added)
   const [activeMenuModal, setActiveMenuModal] = useState<'settings' | 'about' | 'help' | null>(null);
   const [isAIChatOpen, setIsAIChatOpen] = useState(false);
   const [isNoticeListOpen, setIsNoticeListOpen] = useState(false);
-  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
-
-  // Driver GPS States
+  
+  // Driver GPS
   const [isTripActive, setIsTripActive] = useState(false);
   const [isSendingLocation, setIsSendingLocation] = useState(false);
   const watchId = useRef<number | null>(null);
   const wakeLock = useRef<any>(null);
   const lastUpdateTimestamp = useRef<number>(0);
   
-  // Principal Summary States
+  // Principal Summary
   const [isSchoolDetailOpen, setIsSchoolDetailOpen] = useState(false);
   const [schoolSummary, setSchoolSummary] = useState<SchoolSummary | null>(null);
   const [loadingSchoolSummary, setLoadingSchoolSummary] = useState(false);
@@ -94,45 +137,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
   const [categoryUserList, setCategoryUserList] = useState<SchoolUser[]>([]);
   const [loadingUserList, setLoadingUserList] = useState(false);
 
-  useModalBackHandler(isSchoolDetailOpen, () => {
-    if (listCategory) setListCategory(null);
-    else setIsSchoolDetailOpen(false);
-  });
-
+  // Helper to handle independent modals with back button
   useEffect(() => {
-    const handlePopState = (e: PopStateEvent) => {
-      if (e.state && e.state.view) setCurrentView(e.state.view);
-      else setCurrentView('home');
-    };
-    if (!window.history.state) {
-      try { window.history.replaceState({ view: 'home' }, '', window.location.href); } catch (e) {}
-    }
-    window.addEventListener('popstate', handlePopState);
+      const handleModalBack = () => {
+          if (activeMenuModal) setActiveMenuModal(null);
+          else if (isAIChatOpen) setIsAIChatOpen(false);
+          else if (isNoticeListOpen) setIsNoticeListOpen(false);
+          else if (showPayModal) setShowPayModal(false);
+          else if (showLockPopup) setShowLockPopup(null);
+          else if (isSchoolDetailOpen) {
+              if (listCategory) setListCategory(null);
+              else setIsSchoolDetailOpen(false);
+          }
+      };
+      
+      // We only intercept if these specific overlays are open
+      if (activeMenuModal || isAIChatOpen || isNoticeListOpen || showPayModal || showLockPopup || isSchoolDetailOpen) {
+          // Push a temporary state
+          const stateId = Date.now();
+          window.history.pushState({ overlay: stateId }, '');
+          
+          const onPop = (e: PopStateEvent) => {
+              // If we pop, close the overlay
+              handleModalBack();
+          };
+          window.addEventListener('popstate', onPop);
+          return () => window.removeEventListener('popstate', onPop);
+      }
+  }, [activeMenuModal, isAIChatOpen, isNoticeListOpen, showPayModal, showLockPopup, isSchoolDetailOpen, listCategory]);
+
+
+  // Clean up GPS on unmount
+  useEffect(() => {
     return () => {
-      window.removeEventListener('popstate', handlePopState);
       if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
       if (wakeLock.current) { try { wakeLock.current.release(); } catch(e) {} }
     };
   }, []);
 
-  const handleViewChange = (view: 'home' | 'profile') => {
-    if (view === currentView) return;
-    
-    // RESET ALL STACKS when switching view
-    setPrincipalStack([]);
-    setTeacherStack([]);
-    setParentStack([]);
-
-    if (view === 'home') {
-      if (window.history.state?.view === 'profile') window.history.back();
-      else setCurrentView('home');
-    } else {
-      try { window.history.pushState({ view: 'profile' }, '', window.location.href); } catch (e) {}
-      setCurrentView('profile');
-    }
-  };
-
   const fetchGenericData = useCallback(async (targetStudent?: string) => {
+     setFetchError(false);
      try {
         const dashboardData = await fetchDashboardData(credentials.school_id, credentials.mobile, role, credentials.password, targetStudent);
         if (dashboardData) {
@@ -141,9 +185,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
             setIsUserActive(dashboardData.subscription_status === 'active');
             if (dashboardData.student_id && !targetStudent) setSelectedStudentId(dashboardData.student_id);
             localStorage.setItem('vidyasetu_dashboard_data', JSON.stringify(dashboardData));
-            setTimeout(() => setInitialLoading(false), 300);
+        } else {
+            setFetchError(true);
         }
-     } catch (e) {}
+     } catch (e) {
+        setFetchError(true);
+     } finally {
+        setTimeout(() => setInitialLoading(false), 300);
+     }
   }, [credentials, role]);
 
   useEffect(() => {
@@ -151,7 +200,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
   }, [fetchGenericData]);
 
   const handleManualRefresh = async () => {
-    if (!isSchoolActive) return;
     setIsRefreshing(true);
     await fetchGenericData(selectedStudentId || undefined);
     setRefreshTrigger(prev => prev + 1);
@@ -165,7 +213,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
       fetchGenericData(sId).then(() => setIsRefreshing(false));
   };
 
-  // GPS Trip Logic
+  // GPS Logic
   const handleStartTrip = (e: React.MouseEvent) => {
     e.stopPropagation(); e.preventDefault();
     if (!navigator.geolocation) { alert("GPS not supported."); return; }
@@ -207,7 +255,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
           if (isSchoolActive) setIsAIChatOpen(true);
           else showLockedFeature('school');
       } else {
-          // Parent or Student
           if (isSchoolActive && isUserActive) setIsAIChatOpen(true);
           else if (!isSchoolActive) showLockedFeature('school');
           else showLockedFeature('parent');
@@ -245,7 +292,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
     if (!data) return;
     const success = await submitPeriodData(credentials.school_id, credentials.mobile, pData, data.user_name, 'submit');
     if (success) { 
-        setTeacherStack(prev => prev.filter(k => k !== 'edit_period')); 
+        closeTopModal(); // Close period modal
         handleManualRefresh(); 
     } else alert("Submission Failed!");
   };
@@ -255,17 +302,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
       return Array.from({ length: count }, (_, i) => i + 1);
   };
 
+  // --- CHECK IF STACK HAS A MODAL ---
+  const isTop = (key: string) => navStack[navStack.length - 1] === key;
+  const hasInStack = (key: string) => navStack.includes(key);
+
   return (
     <div className="fixed inset-0 h-screen w-screen bg-[#F8FAFC] dark:bg-dark-950 flex flex-col overflow-hidden transition-colors">
       <Header onRefresh={handleManualRefresh} onOpenSettings={() => setActiveMenuModal('settings')} onOpenAbout={() => setActiveMenuModal('about')} onOpenHelp={() => setActiveMenuModal('help')} onOpenNotices={() => setIsNoticeListOpen(true)} onLogout={onLogout} />
 
-      {/* Main Container - Adjusted margin bottom to include safe-area-inset-bottom so content is not hidden behind the nav */}
       <main className="flex-1 w-full flex flex-col overflow-hidden relative" style={{ marginTop: 'calc(5.5rem + env(safe-area-inset-top, 0px))', marginBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }}>
         {currentView === 'home' ? (
             <>
                 <div className="w-full px-4 pt-3 pb-0.5 z-[40] flex-shrink-0">
                     <div className="max-w-4xl mx-auto w-full">
-                        {initialLoading && !data ? <SkeletonSchoolCard /> : <SchoolInfoCard schoolName={data?.school_name || ''} schoolCode={data?.school_code || ''} onClick={handleSchoolCardClick} />}
+                        {initialLoading ? (
+                            <SkeletonSchoolCard />
+                        ) : fetchError || !data ? (
+                            <div className="bg-rose-50 dark:bg-rose-900/10 p-6 rounded-3xl border border-rose-100 dark:border-rose-900/20 text-center mb-6">
+                                <AlertCircle size={32} className="mx-auto text-rose-500 mb-2" />
+                                <h3 className="font-black text-rose-700 dark:text-rose-400 uppercase">Unable to Load Data</h3>
+                                <p className="text-[10px] font-bold text-rose-500/80 mb-4">Please check your internet connection.</p>
+                                <button onClick={handleManualRefresh} className="px-6 py-2 bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Retry</button>
+                            </div>
+                        ) : (
+                            <SchoolInfoCard schoolName={data.school_name || ''} schoolCode={data.school_code || ''} onClick={handleSchoolCardClick} />
+                        )}
                         
                         <div className="flex items-center justify-between mt-1 mb-2.5 px-1.5">
                              <h3 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">
@@ -300,7 +361,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
                                     { key: "leave_management", title: t('leave_portal'), subtitle: 'Administrative Leave Hub', icon: <CalendarRange size={24} /> },
                                     { key: "attendance", title: t('global_attendance'), subtitle: 'Central Attendance Registry', icon: <UserCheck size={24} /> }
                                 ].map((item, index) => (
-                                  <div key={index} onClick={() => isSchoolActive ? setPrincipalStack(prev => [...prev, item.key]) : setShowPayModal(true)} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between cursor-pointer group active:scale-[0.98] transition-all shadow-sm ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/20' : ''}`}><div className="flex items-center gap-4 text-left"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner transition-all group-hover:scale-105 ${!isSchoolActive ? 'bg-rose-500 text-white' : 'bg-brand-500/10 text-brand-600'}`}>{item.icon}</div><div><h3 className={`font-black uppercase text-base leading-tight ${!isSchoolActive ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>{item.title}</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{item.subtitle}</p></div></div>{!isSchoolActive ? <Lock size={20} className="text-rose-400" /> : <ChevronRight size={22} className="text-slate-200 group-hover:text-brand-500 transition-colors" />}</div>
+                                  <div key={index} onClick={() => isSchoolActive ? pushToStack(item.key) : setShowPayModal(true)} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between cursor-pointer group active:scale-[0.98] transition-all shadow-sm ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/20' : ''}`}><div className="flex items-center gap-4 text-left"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner transition-all group-hover:scale-105 ${!isSchoolActive ? 'bg-rose-500 text-white' : 'bg-brand-500/10 text-brand-600'}`}>{item.icon}</div><div><h3 className={`font-black uppercase text-base leading-tight ${!isSchoolActive ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>{item.title}</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{item.subtitle}</p></div></div>{!isSchoolActive ? <Lock size={20} className="text-rose-400" /> : <ChevronRight size={22} className="text-slate-200 group-hover:text-brand-500 transition-colors" />}</div>
                                 ))}
                               </div>
                             )}
@@ -314,7 +375,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
                                       { key: 'history', icon: <History size={28} />, title: "Previous History", sub: "Cloud Submission Log" },
                                       { key: 'homework', icon: <BookOpen size={28} />, title: "Submit Homework", sub: `${data?.total_periods || 8} Daily Learning Periods`, border: "border-l-4 border-brand-500" }
                                   ].map((it, idx) => (
-                                      <div key={idx} onClick={() => isSchoolActive ? setTeacherStack(prev => [...prev, it.key]) : showLockedFeature('school')} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between cursor-pointer active:scale-[0.98] transition-all shadow-sm ${it.border || ''} ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/20' : ''}`}><div className="flex items-center gap-4"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${!isSchoolActive ? 'bg-rose-500 text-white' : 'bg-brand-500/10 text-brand-600'}`}>{it.icon}</div><div className="text-left"><h3 className={`font-black uppercase text-base leading-tight ${!isSchoolActive ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>{it.title}</h3><p className="text-[10px] font-black text-slate-400 font-black uppercase tracking-widest">{it.sub}</p></div></div>{!isSchoolActive ? <Lock size={20} className="text-rose-400" /> : <ChevronRight size={22} className="text-slate-200" />}</div>
+                                      <div key={idx} onClick={() => isSchoolActive ? pushToStack(it.key) : showLockedFeature('school')} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between cursor-pointer active:scale-[0.98] transition-all shadow-sm ${it.border || ''} ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/20' : ''}`}><div className="flex items-center gap-4"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${!isSchoolActive ? 'bg-rose-500 text-white' : 'bg-brand-500/10 text-brand-600'}`}>{it.icon}</div><div className="text-left"><h3 className={`font-black uppercase text-base leading-tight ${!isSchoolActive ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>{it.title}</h3><p className="text-[10px] font-black text-slate-400 font-black uppercase tracking-widest">{it.sub}</p></div></div>{!isSchoolActive ? <Lock size={20} className="text-rose-400" /> : <ChevronRight size={22} className="text-slate-200" />}</div>
                                   ))}
                                </div>
                             )}
@@ -323,7 +384,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
                             {role === 'driver' && (
                                 <div className="space-y-4">
                                     <div className={`relative w-full rounded-[2.8rem] overflow-hidden shadow-xl ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/20 border-2 border-rose-100 dark:border-rose-900/30' : isTripActive ? 'bg-brand-600' : 'bg-brand-500/10 dark:bg-brand-500/5 border border-brand-500/10 dark:border-white/5'}`}><div className={`transition-all duration-500 p-7 sm:p-8 ${isTripActive ? 'space-y-10' : 'space-y-0'}`}><div className="flex items-center justify-between w-full"><div className="flex items-center gap-4 sm:gap-5 flex-1 min-w-0"><div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-[1.8rem] flex items-center justify-center shadow-xl relative shrink-0 ${!isSchoolActive ? 'bg-rose-500 text-white' : isTripActive ? 'bg-white text-brand-600' : 'bg-brand-500 text-white'}`}>{isTripActive ? (<div className="relative flex items-center justify-center"><div className="absolute inset-[-4px] border-4 border-brand-200 border-t-brand-600 rounded-full animate-spin"></div><Truck size={32} strokeWidth={2.5} /></div>) : (<Play size={36} fill="currentColor" strokeWidth={0} className={!isSchoolActive ? 'text-white' : ''} />)}</div><div className="space-y-0.5 truncate text-left"><h3 className={`font-black uppercase text-base sm:text-xl tracking-tight leading-tight ${!isSchoolActive ? 'text-rose-600' : isTripActive ? 'text-white' : 'text-slate-800 dark:text-white'}`}>{isTripActive ? 'LIVE TRACKING ON' : 'START SCHOOL TRIP'}</h3><p className={`text-[10px] font-black uppercase tracking-[0.2em] opacity-80 truncate ${!isSchoolActive ? 'text-rose-400' : isTripActive ? 'text-brand-50' : 'text-slate-400'}`}>{isTripActive ? (isSendingLocation ? 'TRANSMITTING...' : 'BROADCASTING LOCATION') : 'System Check Ready'}</p></div></div><button onClick={isTripActive ? handleStopTrip : handleStartTrip} disabled={!isSchoolActive} className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center shadow-2xl transition-all active:scale-90 shrink-0 z-[100] relative cursor-pointer ${!isSchoolActive ? 'bg-rose-100 text-rose-400 opacity-50' : isTripActive ? 'bg-white text-rose-600' : 'bg-brand-600 text-white border-4 border-brand-500/20'}`}>{isTripActive ? <Square size={20} fill="currentColor" className="text-rose-600" /> : <ChevronRight size={28} strokeWidth={3.5} />}</button></div>{isTripActive && (<div className="pt-6 border-t border-white/10 flex items-center justify-between premium-subview-enter"><div className="flex items-center gap-2.5"><div className={`w-2.5 h-2.5 rounded-full ${isSendingLocation ? 'bg-emerald-400 scale-125 shadow-[0_0_10px_rgba(52,211,153,1)]' : 'bg-white animate-pulse'}`}></div><span className={`text-[10px] font-black uppercase tracking-widest text-white/80`}>{isSendingLocation ? 'SATELLITE SYNC ACTIVE' : 'AUTO-SYNC EVERY 1 MINUTE'}</span></div><div className="opacity-40 text-white"><MoreHorizontal size={24} /></div></div>)}</div></div>
-                                    <div onClick={() => isSchoolActive ? setIsLeaveModalOpen(true) : showLockedFeature('school')} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer shadow-sm border-slate-100 dark:border-white/5 ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/20 border-rose-100 dark:border-rose-900/30' : ''}`}><div className="flex items-center gap-4"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${!isSchoolActive ? 'bg-rose-500 text-white' : 'bg-brand-500/10 text-brand-600'}`}><CalendarRange size={28} /></div><div className="text-left"><h3 className={`font-black uppercase text-base leading-tight ${!isSchoolActive ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>{t('apply_leave')}</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Staff Request Portal</p></div></div>{!isSchoolActive ? <Lock size={20} className="text-rose-400" /> : <ChevronRight size={22} className="text-slate-200" />}</div>
+                                    <div onClick={() => isSchoolActive ? pushToStack('leave_request') : showLockedFeature('school')} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer shadow-sm border-slate-100 dark:border-white/5 ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/20 border-rose-100 dark:border-rose-900/30' : ''}`}><div className="flex items-center gap-4"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${!isSchoolActive ? 'bg-rose-500 text-white' : 'bg-brand-500/10 text-brand-600'}`}><CalendarRange size={28} /></div><div className="text-left"><h3 className={`font-black uppercase text-base leading-tight ${!isSchoolActive ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>{t('apply_leave')}</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Staff Request Portal</p></div></div>{!isSchoolActive ? <Lock size={20} className="text-rose-400" /> : <ChevronRight size={22} className="text-slate-200" />}</div>
                                 </div>
                             )}
 
@@ -331,7 +392,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
                             {(role === 'parent' || role === 'student') && (
                               data?.student_id ? (
                                 <div className="space-y-3">
-                                  <div onClick={() => isSchoolActive ? setParentStack(prev => [...prev, 'attendance_history']) : showLockedFeature('school')} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer shadow-sm ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/20' : ''}`}>
+                                  <div onClick={() => isSchoolActive ? pushToStack('attendance_history') : showLockedFeature('school')} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer shadow-sm ${!isSchoolActive ? 'bg-rose-50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/20' : ''}`}>
                                     <div className="flex items-center gap-4">
                                       <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${!isSchoolActive ? 'bg-rose-500 text-white' : 'bg-brand-500/10 text-brand-600'}`}><UserCheck size={28} /></div>
                                       <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">{t('attendance_status')}</p><h4 className={`text-base font-black uppercase leading-tight ${!isSchoolActive ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>{t('current')}: <span className={data?.today_attendance === 'present' ? 'text-emerald-500' : data?.today_attendance === 'absent' ? 'text-rose-500' : 'text-brand-500'}>{data?.today_attendance ? t(data.today_attendance) : t('waiting')}</span></h4></div>
@@ -346,7 +407,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
                                   ].map((it, idx) => {
                                       const isLocked = !isSchoolActive || !isUserActive;
                                       return (
-                                          <div key={idx} onClick={() => isLocked ? (isSchoolActive ? showLockedFeature('parent') : showLockedFeature('school')) : setParentStack(prev => [...prev, it.key])} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer shadow-sm ${isLocked ? 'bg-rose-50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/20' : ''}`}>
+                                          <div key={idx} onClick={() => isLocked ? (isSchoolActive ? showLockedFeature('parent') : showLockedFeature('school')) : pushToStack(it.key)} className={`glass-card p-5 rounded-[2.5rem] flex items-center justify-between active:scale-[0.98] transition-all cursor-pointer shadow-sm ${isLocked ? 'bg-rose-50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/20' : ''}`}>
                                               <div className="flex items-center gap-4"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${isLocked ? 'bg-rose-500 text-white' : 'bg-brand-500/10 text-brand-600'}`}>{it.icon}</div><div className="text-left"><h3 className={`font-black uppercase text-base leading-tight ${isLocked ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>{it.title}</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{it.sub}</p></div></div>
                                               {isLocked ? <Lock size={18} className="text-rose-400" /> : <ChevronRight size={20} className="text-slate-300" />}
                                           </div>
@@ -370,9 +431,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
         )}
       </main>
 
-      <BottomNav currentView={currentView} onChangeView={handleViewChange} onOpenAIChat={handleOpenAIChat} />
+      <BottomNav currentView={currentView} onChangeView={(view) => { if(view === 'home') handleHomeClick(); else handleProfileClick(); }} onOpenAIChat={handleOpenAIChat} />
       
-      {/* ... (Existing Modals and Logic below remain untouched) */}
+      {/* --- ALL MODALS MANAGED BY NAV STACK --- */}
+      
+      <NoticeModal isOpen={isTop('notice')} onClose={closeTopModal} credentials={credentials} />
+      <TransportTrackerModal isOpen={isTop('transport') || isTop('live_transport')} onClose={closeTopModal} schoolId={data?.school_db_id || ''} />
+      <AnalyticsModal isOpen={isTop('teacher_analytics')} onClose={closeTopModal} schoolCode={credentials.school_id} />
+      <HomeworkAnalyticsModal isOpen={isTop('parents_analytics')} onClose={closeTopModal} schoolCode={credentials.school_id} />
+      <StaffLeaveManagementModal isOpen={isTop('leave_management')} onClose={closeTopModal} schoolId={data?.school_db_id || ''} />
+      <AttendanceModal isOpen={isTop('attendance')} onClose={closeTopModal} schoolId={data?.school_db_id || ''} teacherId={data?.user_id || ''} />
+      
+      <LeaveRequestModal isOpen={isTop('leave') || isTop('leave_request')} onClose={closeTopModal} userId={data?.user_id || ''} schoolId={data?.school_db_id || ''} />
+      <TeacherHistoryModal isOpen={isTop('history')} onClose={closeTopModal} credentials={credentials} />
+      
+      <Modal isOpen={isTop('homework')} onClose={closeTopModal} title="TODAY'S PORTAL"><div className="space-y-4 premium-subview-enter"><div className="flex items-center gap-3 bg-brand-50 dark:bg-brand-500/10 p-5 rounded-[2.5rem] border border-brand-100 dark:border-brand-500/20"><div className="w-14 h-14 bg-white dark:bg-dark-900 rounded-2xl flex items-center justify-center text-brand-600 shadow-sm shrink-0"><Sparkles size={28} /></div><div className="text-left"><h4 className="font-black text-slate-800 dark:text-white uppercase leading-tight">Quick Submission</h4><p className="text-[10px] font-black text-slate-400 dark:text-brand-500/60 uppercase tracking-widest">Update {data?.total_periods || 8} sessions</p></div></div><div className="grid grid-cols-2 gap-3 pb-4">{getPeriodsArray().map((num) => { const pData = data?.periods?.find(p => p.period_number === num); const isSubmitted = pData?.status === 'submitted'; return (<div key={num} onClick={() => { setSelectedPeriod(num); pushToStack('edit_period'); }} className={`glass-card p-4 rounded-[2rem] transition-all h-36 flex flex-col justify-between cursor-pointer active:scale-95 ${isSubmitted ? 'border-brand-500/30 bg-brand-50 dark:bg-brand-500/5 shadow-inner' : ''}`}><div className="flex justify-between items-start text-left"><span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">P {num}</span>{isSubmitted && <div className="text-brand-500"><CheckCircle2 size={16} /></div>}</div><div className="min-w-0 text-left"><p className="text-sm font-black truncate uppercase text-slate-800 dark:text-white leading-tight">{pData?.subject || 'Waiting'}</p><p className="text-[9px] font-bold text-slate-400 uppercase truncate">{pData?.class_name || 'Empty'}</p></div><button className={`w-full py-2 rounded-2xl text-[8px] font-black uppercase tracking-widest ${isSubmitted ? 'bg-brand-500 text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'}`}>{isSubmitted ? 'EDIT' : 'SET'}</button></div>); })}</div><button onClick={closeTopModal} className="w-full py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-t border-slate-50 dark:border-white/5">Close Portal</button></div></Modal>
+      <PeriodModal isOpen={isTop('edit_period')} onClose={closeTopModal} periodNumber={selectedPeriod || 1} onSubmit={handlePeriodSubmit} initialData={data?.periods?.find(p => p.period_number === selectedPeriod)} schoolDbId={data?.school_db_id} />
+
+      {/* Parent/Student Modals */}
+      {data && (
+        <>
+            <AttendanceHistoryModal isOpen={isTop('attendance_history')} onClose={closeTopModal} studentId={data.student_id || ''} studentName={data.student_name || ''} />
+            <StudentLeaveRequestModal isOpen={isTop('apply_leave')} onClose={closeTopModal} parentId={role === 'student' ? (data.linked_parent_id || data.user_id || '') : (data.user_id || '')} studentId={data.student_id || ''} schoolId={data.school_db_id || ''} />
+            <HomeworkListModal isOpen={hasInStack('daily_tasks')} onClose={() => { /* Handle custom close for deeper stack */ window.history.go(hasInStack('homework_details') ? -2 : -1); }} dashboardData={data} credentials={credentials} isSubscribed={isUserActive} onLockClick={() => showLockedFeature('parent')} onViewHomework={(hw) => { setSelectedHomework(hw); pushToStack('homework_details'); }} onRefresh={handleManualRefresh} isRefreshing={isRefreshing} refreshTrigger={refreshTrigger} />
+            <ParentHomeworkModal isOpen={isTop('homework_details')} onClose={closeTopModal} data={selectedHomework} onComplete={async () => { if(selectedHomework) await updateParentHomeworkStatus(credentials.school_id, data.class_name || '', data.section || '', data.student_id || '', credentials.mobile, selectedHomework.period, selectedHomework.subject, getISTDate()); closeTopModal(); handleManualRefresh(); }} isSubmitting={false} />
+        </>
+      )}
+
+      {/* --- INDEPENDENT OVERLAYS --- */}
       <Modal isOpen={!!showLockPopup} onClose={() => setShowLockPopup(null)} title="ACCESS RESTRICTED"><div className="text-center py-4 space-y-6"><div className="w-20 h-20 bg-rose-500/10 text-rose-500 rounded-[2rem] flex items-center justify-center mx-auto shadow-inner"><Lock size={40} /></div><div><h4 className="text-xl font-black uppercase text-slate-800 dark:text-white tracking-tight">Services Blocked</h4><p className="text-xs text-slate-400 font-bold uppercase mt-3 px-4 leading-relaxed italic">"{showLockPopup}"</p></div><button onClick={() => setShowLockPopup(null)} className="w-full py-5 rounded-[2rem] bg-slate-900 dark:bg-brand-500 text-white font-black uppercase text-xs tracking-widest shadow-xl">Got it</button></div></Modal>
       <Modal isOpen={showPayModal} onClose={() => setShowPayModal(false)} title="PREMIUM UPGRADE"><SubscriptionModal role={role} /></Modal>
       <AIChatModal isOpen={isAIChatOpen} onClose={() => setIsAIChatOpen(false)} userName={data?.user_name || 'User'} role={role} className={data?.class_name} dashboardData={data} />
@@ -380,16 +466,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
       <AboutModal isOpen={activeMenuModal === 'about'} onClose={() => setActiveMenuModal(null)} />
       <HelpModal isOpen={activeMenuModal === 'help'} onClose={() => setActiveMenuModal(null)} />
       <NoticeListModal isOpen={isNoticeListOpen} onClose={() => setIsNoticeListOpen(false)} schoolId={credentials.school_id} role={role} />
-      
-      <LeaveRequestModal isOpen={role === 'driver' && isLeaveModalOpen} onClose={() => setIsLeaveModalOpen(false)} userId={data?.user_id || ''} schoolId={data?.school_db_id || ''} />
 
-      {/* School Detail Modal */}
+      {/* School Detail Overlay */}
       <Modal isOpen={isSchoolDetailOpen} onClose={() => setIsSchoolDetailOpen(false)} title="INSTITUTION PROFILE">
         <div className="flex flex-col h-[70vh]">
           {!listCategory ? (
              <div className="space-y-6 overflow-y-auto no-scrollbar pb-4 flex-1 relative">
-                
-                {/* Refresh Button */}
                 <button 
                     onClick={handleSyncSchoolSummary}
                     disabled={schoolSummaryRefreshing}
@@ -397,98 +479,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ credentials, role, userNam
                 >
                     <RefreshCw size={18} />
                 </button>
-
                 <div className="p-6 rounded-[2.5rem] bg-slate-900 dark:bg-slate-800 text-white shadow-xl relative overflow-hidden mt-2">
                     <div className="relative z-10 text-center">
-                        <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-3 backdrop-blur-md border border-white/20">
-                            <SchoolIcon size={32} />
-                        </div>
+                        <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-3 backdrop-blur-md border border-white/20"><SchoolIcon size={32} /></div>
                         <h2 className="text-xl font-black uppercase tracking-tight leading-tight">{schoolSummary?.school_name || (loadingSchoolSummary ? 'Loading...' : 'Unknown')}</h2>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Code: {schoolSummary?.school_code || '---'}</p>
                     </div>
                 </div>
-
                 <div className="p-5 rounded-[2rem] bg-brand-50 dark:bg-brand-500/10 border border-brand-100 dark:border-brand-500/20 flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-brand-500 text-white flex items-center justify-center shadow-lg shadow-brand-500/20">
-                        <User size={24} />
-                    </div>
-                    <div>
-                        <p className="text-[9px] font-black text-brand-600 uppercase tracking-widest mb-0.5">Principal</p>
-                        <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase">{schoolSummary?.principal_name || 'Not Assigned'}</h4>
-                    </div>
+                    <div className="w-12 h-12 rounded-2xl bg-brand-500 text-white flex items-center justify-center shadow-lg shadow-brand-500/20"><User size={24} /></div>
+                    <div><p className="text-[9px] font-black text-brand-600 uppercase tracking-widest mb-0.5">Principal</p><h4 className="text-sm font-black text-slate-800 dark:text-white uppercase">{schoolSummary?.principal_name || 'Not Assigned'}</h4></div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-3">
                     <div onClick={() => handleCategoryClick('teachers')} className="p-4 rounded-[2rem] bg-white dark:bg-white/5 border border-slate-100 dark:border-white/10 shadow-sm cursor-pointer active:scale-95 transition-all">
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Teaching Staff</p>
-                        <div className="flex items-end gap-2">
-                            <span className="text-3xl font-black text-slate-800 dark:text-white">{schoolSummary?.total_teachers || 0}</span>
-                            <ChevronRight size={16} className="text-slate-300 mb-1" />
-                        </div>
+                        <div className="flex items-end gap-2"><span className="text-3xl font-black text-slate-800 dark:text-white">{schoolSummary?.total_teachers || 0}</span><ChevronRight size={16} className="text-slate-300 mb-1" /></div>
                     </div>
                     <div onClick={() => handleCategoryClick('drivers')} className="p-4 rounded-[2rem] bg-white dark:bg-white/5 border border-slate-100 dark:border-white/10 shadow-sm cursor-pointer active:scale-95 transition-all">
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Transport</p>
-                        <div className="flex items-end gap-2">
-                            <span className="text-3xl font-black text-slate-800 dark:text-white">{schoolSummary?.total_drivers || 0}</span>
-                            <ChevronRight size={16} className="text-slate-300 mb-1" />
-                        </div>
+                        <div className="flex items-end gap-2"><span className="text-3xl font-black text-slate-800 dark:text-white">{schoolSummary?.total_drivers || 0}</span><ChevronRight size={16} className="text-slate-300 mb-1" /></div>
                     </div>
                 </div>
              </div>
           ) : (
              <div className="flex flex-col h-full premium-subview-enter">
-                <button onClick={() => setListCategory(null)} className="flex items-center gap-2 text-slate-400 font-black text-[10px] uppercase tracking-widest mb-4 hover:text-brand-500 transition-colors">
-                    <ChevronLeft size={14} /> Back to Summary
-                </button>
+                <button onClick={() => setListCategory(null)} className="flex items-center gap-2 text-slate-400 font-black text-[10px] uppercase tracking-widest mb-4 hover:text-brand-500 transition-colors"><ChevronLeft size={14} /> Back to Summary</button>
                 <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase mb-4 pl-1">{listCategory} Directory</h3>
-                
                 <div className="flex-1 overflow-y-auto pr-1 space-y-3 no-scrollbar">
-                    {loadingUserList ? (
-                        <div className="text-center py-10"><Loader2 className="animate-spin mx-auto text-brand-500" /></div>
-                    ) : categoryUserList.length === 0 ? (
-                        <div className="text-center py-10 opacity-30 text-[10px] font-black uppercase tracking-widest">No records found</div>
-                    ) : (
-                        categoryUserList.map((user, i) => (
-                            <div key={i} className="p-4 bg-white dark:bg-white/5 rounded-[1.5rem] border border-slate-100 dark:border-white/5 flex items-center gap-3 shadow-sm">
-                                <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/10 flex items-center justify-center font-black text-slate-500 dark:text-slate-300">
-                                    {user.name.charAt(0)}
-                                </div>
-                                <div>
-                                    <p className="font-black text-sm text-slate-800 dark:text-white uppercase truncate">{user.name}</p>
-                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.mobile}</p>
-                                </div>
-                            </div>
-                        ))
-                    )}
+                    {loadingUserList ? <div className="text-center py-10"><Loader2 className="animate-spin mx-auto text-brand-500" /></div> : categoryUserList.length === 0 ? <div className="text-center py-10 opacity-30 text-[10px] font-black uppercase tracking-widest">No records found</div> : categoryUserList.map((user, i) => (
+                        <div key={i} className="p-4 bg-white dark:bg-white/5 rounded-[1.5rem] border border-slate-100 dark:border-white/5 flex items-center gap-3 shadow-sm">
+                            <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/10 flex items-center justify-center font-black text-slate-500 dark:text-slate-300">{user.name.charAt(0)}</div>
+                            <div><p className="font-black text-sm text-slate-800 dark:text-white uppercase truncate">{user.name}</p><p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user.mobile}</p></div>
+                        </div>
+                    ))}
                 </div>
              </div>
           )}
         </div>
       </Modal>
-
-      {/* STACK MODALS */}
-      <NoticeModal isOpen={principalStack[principalStack.length-1] === 'notice'} onClose={() => setPrincipalStack(prev => prev.slice(0, -1))} credentials={credentials} />
-      <TransportTrackerModal isOpen={principalStack[principalStack.length-1] === 'transport'} onClose={() => setPrincipalStack(prev => prev.slice(0, -1))} schoolId={data?.school_db_id || ''} />
-      <AnalyticsModal isOpen={principalStack[principalStack.length-1] === 'teacher_analytics'} onClose={() => setPrincipalStack(prev => prev.slice(0, -1))} schoolCode={credentials.school_id} />
-      <HomeworkAnalyticsModal isOpen={principalStack[principalStack.length-1] === 'parents_analytics'} onClose={() => setPrincipalStack(prev => prev.slice(0, -1))} schoolCode={credentials.school_id} />
-      <StaffLeaveManagementModal isOpen={principalStack[principalStack.length-1] === 'leave_management'} onClose={() => setPrincipalStack(prev => prev.slice(0, -1))} schoolId={data?.school_db_id || ''} />
-      <AttendanceModal isOpen={principalStack[principalStack.length-1] === 'attendance'} onClose={() => setPrincipalStack(prev => prev.slice(0, -1))} schoolId={data?.school_db_id || ''} teacherId={data?.user_id || ''} />
-
-      <AttendanceModal isOpen={teacherStack[teacherStack.length-1] === 'attendance'} onClose={() => setTeacherStack(prev => prev.slice(0, -1))} schoolId={data?.school_db_id || ''} teacherId={data?.user_id || ''} />
-      <LeaveRequestModal isOpen={teacherStack[teacherStack.length-1] === 'leave'} onClose={() => setTeacherStack(prev => prev.slice(0, -1))} userId={data?.user_id || ''} schoolId={data?.school_db_id || ''} />
-      <TeacherHistoryModal isOpen={teacherStack[teacherStack.length-1] === 'history'} onClose={() => setTeacherStack(prev => prev.slice(0, -1))} credentials={credentials} />
-      <Modal isOpen={teacherStack[teacherStack.length-1] === 'homework'} onClose={() => setTeacherStack(prev => prev.slice(0, -1))} title="TODAY'S PORTAL"><div className="space-y-4 premium-subview-enter"><div className="flex items-center gap-3 bg-brand-50 dark:bg-brand-500/10 p-5 rounded-[2.5rem] border border-brand-100 dark:border-brand-500/20"><div className="w-14 h-14 bg-white dark:bg-dark-900 rounded-2xl flex items-center justify-center text-brand-600 shadow-sm shrink-0"><Sparkles size={28} /></div><div className="text-left"><h4 className="font-black text-slate-800 dark:text-white uppercase leading-tight">Quick Submission</h4><p className="text-[10px] font-black text-slate-400 dark:text-brand-500/60 uppercase tracking-widest">Update {data?.total_periods || 8} sessions</p></div></div><div className="grid grid-cols-2 gap-3 pb-4">{getPeriodsArray().map((num) => { const pData = data?.periods?.find(p => p.period_number === num); const isSubmitted = pData?.status === 'submitted'; return (<div key={num} onClick={() => { setSelectedPeriod(num); setTeacherStack(prev => [...prev, 'edit_period']); }} className={`glass-card p-4 rounded-[2rem] transition-all h-36 flex flex-col justify-between cursor-pointer active:scale-95 ${isSubmitted ? 'border-brand-500/30 bg-brand-50 dark:bg-brand-500/5 shadow-inner' : ''}`}><div className="flex justify-between items-start text-left"><span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">P {num}</span>{isSubmitted && <div className="text-brand-500"><CheckCircle2 size={16} /></div>}</div><div className="min-w-0 text-left"><p className="text-sm font-black truncate uppercase text-slate-800 dark:text-white leading-tight">{pData?.subject || 'Waiting'}</p><p className="text-[9px] font-bold text-slate-400 uppercase truncate">{pData?.class_name || 'Empty'}</p></div><button className={`w-full py-2 rounded-2xl text-[8px] font-black uppercase tracking-widest ${isSubmitted ? 'bg-brand-500 text-white shadow-lg' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'}`}>{isSubmitted ? 'EDIT' : 'SET'}</button></div>); })}</div><button onClick={() => setTeacherStack(prev => prev.slice(0, -1))} className="w-full py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-t border-slate-50 dark:border-white/5">Close Portal</button></div></Modal>
-      <PeriodModal isOpen={teacherStack[teacherStack.length-1] === 'edit_period'} onClose={() => setTeacherStack(prev => prev.slice(0, -1))} periodNumber={selectedPeriod || 1} onSubmit={handlePeriodSubmit} initialData={data?.periods?.find(p => p.period_number === selectedPeriod)} schoolDbId={data?.school_db_id} />
-
-      {data && (
-        <>
-            <AttendanceHistoryModal isOpen={parentStack[parentStack.length-1] === 'attendance_history'} onClose={() => setParentStack(prev => prev.slice(0, -1))} studentId={data.student_id || ''} studentName={data.student_name || ''} />
-            <StudentLeaveRequestModal isOpen={parentStack[parentStack.length-1] === 'apply_leave'} onClose={() => setParentStack(prev => prev.slice(0, -1))} parentId={role === 'student' ? (data.linked_parent_id || data.user_id || '') : (data.user_id || '')} studentId={data.student_id || ''} schoolId={data.school_db_id || ''} />
-            <TransportTrackerModal isOpen={parentStack[parentStack.length-1] === 'live_transport'} onClose={() => setParentStack(prev => prev.slice(0, -1))} schoolId={data.school_db_id || ''} />
-            <HomeworkListModal isOpen={parentStack.includes('daily_tasks')} onClose={() => setParentStack(prev => prev.filter(k => k !== 'daily_tasks' && k !== 'homework_details'))} dashboardData={data} credentials={credentials} isSubscribed={isUserActive} onLockClick={() => showLockedFeature('parent')} onViewHomework={(hw) => { setSelectedHomework(hw); setParentStack(prev => [...prev, 'homework_details']); }} onRefresh={handleManualRefresh} isRefreshing={isRefreshing} refreshTrigger={refreshTrigger} />
-            <ParentHomeworkModal isOpen={parentStack[parentStack.length-1] === 'homework_details'} onClose={() => setParentStack(prev => prev.slice(0, -1))} data={selectedHomework} onComplete={async () => { if(selectedHomework) await updateParentHomeworkStatus(credentials.school_id, data.class_name || '', data.section || '', data.student_id || '', credentials.mobile, selectedHomework.period, selectedHomework.subject, getISTDate()); setParentStack(prev => prev.slice(0, -1)); handleManualRefresh(); }} isSubmitting={false} />
-        </>
-      )}
     </div>
   );
 };
